@@ -1,0 +1,734 @@
+org 0x00
+
+// Start of program, also where to jump to when repeating program
+main:
+  // ------ Initialisation ------
+  MOV AX, 0x0
+  MOV [num1],AX           // Set num1 to 0
+  MOV [num2],AX           // Set num2 to 0
+  MOV [operator],AX       // Set operator to 0
+  MOV [result],AX         // Set result to 0
+  MOV [negativeFlags],AX  // Set result to 0
+  MOV SP,0x1FFF           // Reset the stack pointer
+
+  // --- Clear Screen ---
+  MOV AX,0x0C
+  PUSH AX
+  CALL print
+
+  // ------ End of Initialisation ------
+
+  MOV AX,enterText     // "Enter "
+  PUSH AX              // Output first part of the line
+  CALL printString
+
+  MOV AX,number1Text   // "Number 1: "
+  PUSH AX              // Output second part of the line
+  CALL printString
+
+  CALL getNum1         // Start reading the input buffer for the first number
+
+  MOV AX,enterText     // "Enter "
+  PUSH AX              // Output first part of the line
+  CALL printString
+
+  MOV AX,number2Text   // "Number 2: "
+  PUSH AX              // Output second part of the line
+  CALL printString
+
+  CALL getNum2         // Start reading the input buffer for the second number
+
+  MOV AX,enterText     // "Enter "
+  PUSH AX              // Output first part of the line
+  CALL printString
+
+  MOV AX,operationText // "Operation: "
+  PUSH AX              // Output second part of the line
+  CALL printString
+
+  CALL getOperator     // Start reading the input buffer for the operator
+
+  CALL computeResult   // Calculate the result value based on the operator
+
+  CALL handleNegative  // Converts the negative result to a positive number but, 
+                       // will add a '-' sign to the start of the string once converted
+
+  MOV AX,result        // Load the result
+  PUSH AX              // Push as a parameter
+  CALL numToString
+
+  MOV AX,resultText    // "Result: "
+  PUSH AX              // Output second part of the line
+  CALL printString
+
+  MOV AX,[negativeFlags] 
+  AND AX,0x04          // AX & 0000 0100 is > 0 when result is negative 
+  JEQ positive
+  MOV AX,'-'
+  PUSH AX
+  CALL print
+
+  positive:
+  MOV AX,[outString]   // Result as an ascii string
+  PUSH AX              // Push as a parameter
+  CALL printString
+
+  MOV AX,'\n'
+  PUSH AX
+  CALL print           // Print a new line character
+
+  MOV AX,exitText      // "Enter 'X' to exit\n"
+  PUSH AX
+  CALL printString
+
+  MOV AX,continueText  // "Or Type 'Enter' to continue\n"
+  PUSH AX
+  CALL printString
+
+  CALL input           // Get next character
+
+  CMP AX,'X'
+  JEQ exitProgram
+  CMP AX,'x'
+  JEQ exitProgram
+  CMP AX,'\n'
+  JEQ main
+
+  JMP error
+// End of main
+
+
+exitProgram:
+  HALT
+
+
+org 0x0100 // Offset variables and subroutines after reserved memory
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: getNum1                                              | 
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------|
+// |Description: Recursively loops through the console input buffer  |
+// |to get all the ascii characters used in the first number which is|
+// |then coverted to a hexadecimal number and saved into 'num1'      |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+getNum1:
+  CALL input      // Get first (potentially only) digit and store in in AX
+  
+  PUSH AX         // Push parameter for subroutine print
+  CALL print
+
+  CMP AX,'-'      // Check if inputted number is negative
+  JEQ setNum1Negative
+
+  PUSH AX         // Push parameter for subroutine asciiToNum
+  CALL asciiToNum // Convert the ascii character in AX to a hexadecimal number
+  
+  CMP AX,0x0A
+  JGE error       // If the value returned from asciiToNum is <= 10 then a 
+                  //something other than a digit was converted
+  
+  MOV BX,[num1]   // Load BX with the current value of 'num1'
+  CMP BX,0x00     // If num1 == 0 then this is the first digit otherwise
+                  // num1 needs to be shifted to the left (multiplied by 10)
+  JEQ firstDigit1
+  MUL BX,0x0A     // If this is not the first digit for num1 multiply by 10
+  MOV [num1],BX   // Load the new value back into num1
+  firstDigit1:
+    ADD AX,BX     // Add to the converted character from the console to the value of num1
+    MOV [num1],AX // Overwrite the old value in 'num1' with the new value
+    CALL peek     // Look at the next character in the input buffer without removing it
+    CMP AX,0x0A   // Check if it is the end of the line (Line Feed, 0x0A)
+    JNE getNum1   // Continue for the next number
+
+    CALL input    // Get the Line Feed character from the console buffer
+    PUSH AX       // Push Line Feed character
+    CALL print    // Print the Line Feed character
+
+    MOV AX,[negativeFlags]
+    AND AX,0x01
+    JEQ num1Ret   // If number is not negative skip the rest
+
+    MOV AX,[num1]
+    NEG AX        // Get two's-complement negation
+    MOV [num1],AX // Replace original num1 with negative version
+
+    num1Ret:
+    RET
+
+  setNum1Negative:
+    MOV AX,[negativeFlags]
+    OR AX,0x01
+    MOV [negativeFlags],AX
+    JMP getNum1
+// |-------------------- End of num1 subroutine ---------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: getNum2                                              | 
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------|
+// |Description: Recursively loops through the console input buffer  |
+// |to get all the ascii characters used in the second number which  |
+// |is then coverted to a hexadecimal number and saved into 'num2'   |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+getNum2:
+  CALL input      // Get first (potentially only) digit and store in in AX
+  
+  PUSH AX         // Push parameter for subroutine print
+  CALL print
+
+  CMP AX,'-'      // Check if inputted number is negative
+  JEQ setNum2Negative
+
+  PUSH AX         // Push parameter for subroutine asciiToNum
+  CALL asciiToNum // Convert the ascii character in AX to a hexadecimal number
+  
+  CMP AX,0x0A
+  JGE error       // If the value returned from asciiToNum is <= 10 then a 
+                  //something other than a digit was converted
+  
+  MOV BX,[num2]   // Load BX with the current value of 'num2'
+  CMP BX,0x00     // If num2 == 0 then this is the first digit otherwise
+                  // num2 needs to be shifted to the left (multiplied by 10)
+  JEQ firstDigit2
+  MUL BX,0x0A     // If this is not the first digit for num2 multiply by 10
+  MOV [num2],BX   // Load the new value back into num2
+  firstDigit2:
+    ADD AX,BX     // Add to the converted character from the console to the value of num2
+    MOV [num2],AX // Overwrite the old value in 'num2' with the new value
+    CALL peek     // Look at the next character in the input buffer without removing it
+    CMP AX,0x0A   // Check if it is the end of the line (Line Feed, 0x0A)
+    JNE getNum2   // Continue for the next number
+
+    CALL input    // Get the Line Feed character from the console buffer
+    PUSH AX       // Push Line Feed character
+    CALL print    // Print the Line Feed character
+
+    MOV AX,[negativeFlags]
+    AND AX,0x02
+    JEQ num2Ret   // If number is not negative skip the rest
+
+    MOV AX,[num2]
+    NEG AX        // Get two's-complement negation
+    MOV [num2],AX // Replace original num2 with negative version
+
+    num2Ret:
+    RET
+
+  setNum2Negative:
+    MOV AX,[negativeFlags]
+    OR AX,0x02
+    MOV [negativeFlags],AX
+    JMP getNum2
+// |-------------------- End of num2 subroutine ---------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: getOperator                                          |
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------|
+// |Description: Checks if the next character is a valid operator and|
+// |if so setsthe 'operator' variable which is used to select what   |
+// |operation to do on both numbers                                  |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+getOperator:
+  CALL input
+  MOV [operator],AX // Load operator into variable for use later
+
+  PUSH AX
+  CALL print        // Print the operator character
+
+  CALL input        // Get the Line Feed Character
+  PUSH AX
+  CALL print        // Print the Line Feed character
+  RET
+// |----------------- End of getOperator subroutine -----------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: computeResult                                        |
+// |-----------------------------------------------------------------|
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------|
+// |Description: Calculates the result of the operation between the  |
+// |two inputted numbers                                             |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+computeResult:
+  MOV AX,[operator] // Load inputted operator
+  CMP AX,'+'        // Addition Operator
+  JEQ callAdd
+  CMP AX,'-'        // Subtraction Operator
+  JEQ callSub
+  CMP AX,'*'        // Multiplication Operator
+  JEQ callMul
+  CMP AX,'/'        // Division Operator
+  JEQ callDiv
+  CMP AX,'%'        // Modulus Operator
+  JEQ callMod
+
+  JMP error         // Invalid Operator
+
+  callAdd:
+    CALL opAdd
+    RET
+  callSub:
+    CALL opSub
+    RET
+  callMul:
+    CALL opMul
+    RET
+  callDiv:
+    CALL opDiv
+    RET
+  callMod:
+    CALL opMod
+    RET
+// |---------------- End of computeResult subroutine ----------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: handleNegative                                       | 
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------| 
+// |Description: Checks if the result was negative and if it was     |
+// |it makes it positive so that it can be displayed correctly       |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+handleNegative:
+  MOV AX,[result]
+  MOV BX,[negativeFlags]
+  AND BX,0x04
+  JEQ retPositive
+  NEG AX
+  MOV [result],AX
+  
+  retPositive:
+    RET
+// |--------------- End of handleNegative subroutine ----------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: input                                                | 
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------| 
+// |Description: Eats the next character from the console input      |
+// |buffer and returns the value in the AX register                  |
+// |-----------------------------------------------------------------|
+// |Return value: Ascii value of next character in input console     |
+// |buffer, returned in the AX register                              |
+// |-----------------------------------------------------------------|
+input:
+  CALL peek         // Used to get the value from the input buffer
+  MOV BX,0x0
+  MOV [INSTATUS],BX // Tell console to send the next value in the buffer
+  RET
+// |-------------------- End of input subroutine --------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: peek                                                 | 
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------| 
+// |Description: Peeks the next character in the console buffer      |
+// |without removing it, storing the value in AX                     |
+// |-----------------------------------------------------------------|
+// |Return value: Ascii value of next character in input console     |
+// |buffer, returned in the AX register                              |
+// |-----------------------------------------------------------------|
+peek:
+  MOV AX,[INSTATUS] // Load the input state into AX
+  CMP AX,0x1        // Check if there is data to read
+  JNE peek          // Repeat checks till data is found
+  MOV AX,[INDATA]   // Load the value inputted into AX
+  RET
+// |-------------------- End of peek subroutine ---------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: print                                                |
+// |-----------------------------------------------------------------|
+// |Parameters: Character to print                                   |
+// |-----------------------------------------------------------------|
+// |Description: Prints a single character to the console            |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+print:
+  POP BX                 // Pop the return address temporarily into BX
+  POP AX                 // Pop the passed parameter, the character to print
+  PUSH BX                // Push the return address back onto the stack
+
+  MOV BX,[OUTSTATUS]     // Load output status
+  CMP BX,0x0             // If 0 write else repeat
+  JNE print
+  output:
+    MOV [OUTDATA],AX     // Write AX into output register
+    MOV BX,0x1
+    MOV [OUTSTATUS],BX   // Set status so console reads the character
+
+  RET
+// |-------------------- End of print subroutine --------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: printString                                          |
+// |-----------------------------------------------------------------|
+// |Parameters: Pointer to string to print                           |
+// |-----------------------------------------------------------------|
+// |Description: Prints each character of a string to the console    |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+printString:
+  POP BX                // Pop the return address temporarily into BX
+  POP AX                // Pop the passed parameter, which is a pointer to a string
+  PUSH BX               // Push the return address back onto the stack
+
+  printStringLoop:
+    MOV BX,[AX]         // Load the character pointed at by AX
+    CMP BX,0x0          // Is the Null-Terminator?
+    JEQ printStringEnd  // Return if end of the string is reached
+    INC AX              // Point to the next character
+    PUSH AX             // Push AX so we can retrieve it after the subroutine call
+    PUSH BX             // Push the current character to print as a parameter 
+    CALL print
+    POP AX              // Pop the pointer to the string back into AX
+    JMP printStringLoop
+  
+  printStringEnd:
+    RET
+// |----------------- End of printString subroutine -----------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: numToString                                          | 
+// |-----------------------------------------------------------------| 
+// |Parameters: 16-bit Number to convert, Negative Flag for number   |
+// |-----------------------------------------------------------------| 
+// |Description: Converts a 16-bit Number into an char array         |
+// |-----------------------------------------------------------------|
+// |Return value: Pointer to the char array on the stack, returned in|
+// |the AX register                                                  |
+// |-----------------------------------------------------------------|
+numToString:
+  // --- Get passed parameter ---
+    POP BX               // Pop return address into BX
+    POP AX               // Pop parameter into AX
+    PUSH BX              // Push return address back onto stack
+
+  // --- Setup stack for string ---
+    PUSH 0x00            // Push Null-Terminator
+
+  // --- Push next character to stack ---
+  nextChar:
+    MOV AX,[result]      // Load AX with result
+    CMP AX,0x0A
+    JGE multiDigit       // Jump if number is more than 1 digit (num >= 10)
+                         // Otherwise this is the last digit remaining
+
+    // --- Push the final character to the stack and exit subroutine ---
+    PUSH BX              // Push this subroutines return value temporarily
+    PUSH AX              // Push the parameter to stack
+    CALL numToAscii      // Convert number to character
+    POP BX               // Restore BX with this subroutines return address
+    PUSH AX              // Push last digit to stack
+    JMP numToStringEnd
+
+  multiDigit:
+    // --- Get next digit, convert to character and push to stack ---
+    MOD AX,0x0A          // Find the least significant digit
+    PUSH BX              // Push this subroutines return value temporarily
+    PUSH AX              // Push the parameter to stack
+    CALL numToAscii      // Convert number to character
+    POP BX               // Restore BX with this subroutines return address
+    PUSH AX              // Push character to stack
+
+    // --- Adjust result variable to new value ---
+    MOV AX,[result]
+    DIV AX,0x0A
+    MOV [result],AX      // Divide outNum by 10
+    JMP nextChar
+
+  numToStringEnd:
+    MOV AX,SP            // outString -> Start of Null-Terminated string in stack
+    INC AX
+    MOV [outString],AX
+    PUSH BX              // Push return address back onto stack
+    RET
+// |----------------- End of numToString subroutine -----------------|
+
+
+// |-----------------------------------------------------------------|
+// |Group of Subroutines: Arithmetic Operations                      | 
+// |-----------------------------------------------------------------| 
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------| 
+// |Description: Apply various arithmetic operations between num1    |
+// |and num2                                                         |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+// Adds num1 to num2 and stores in the output in result
+opAdd:
+  MOV AX,[num1]
+  MOV BX,[num2]
+  ADD AX,BX
+  MOV [result],AX
+  JL setResultNegativeFlag // If negative flag is set result is negative
+  RET
+
+// Subtracts num1 to num2 and stores in the output in result
+opSub:
+  MOV AX,[num1]
+  MOV BX,[num2]
+  SUB AX,BX
+  MOV [result],AX
+  JL setResultNegativeFlag // If negative flag is set result is negative
+  RET
+
+// Multiplies num1 by num2 and stores in the output in result
+opMul:
+  MOV AX,[num1]
+  MOV BX,[num2]
+  MUL AX,BX
+  MOV [result],AX
+  JL setResultNegativeFlag // If negative flag is set result is negative
+  RET
+
+// Divides num1 to num2 and stores in the output in result
+opDiv:
+  MOV AX,[num1]
+  MOV BX,[num2]
+  DIV AX,BX
+  MOV [result],AX
+  JL setResultNegativeFlag // If negative flag is set result is negative
+  RET
+
+// Divides num1 to num2, takes the remainder and stores in the output in result
+opMod:
+  MOV AX,[num1]
+  MOV BX,[num2]
+  MOD AX,BX
+  MOV [result],AX
+  JL setResultNegativeFlag // If negative flag is set result is negative
+  RET
+
+// Sets the negative flag for the result variable
+setResultNegativeFlag:
+  MOV AX,[negativeFlags]
+  OR AX,0x04 // 0000 0100
+  MOV [negativeFlags],AX
+  RET
+// |--------- End of Arithmetic Operations subroutine group ---------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: numToAscii                                           |
+// |-----------------------------------------------------------------|
+// |Parameters: Number to convert                                    |
+// |-----------------------------------------------------------------|
+// |Description: Converts a number to its ascii character            |
+// |-----------------------------------------------------------------|
+// |Return value: Converted ascii character returned in AX register  |
+// |-----------------------------------------------------------------|
+numToAscii:
+  POP BX      // Temporarily keep the return address in BX
+  POP AX      // Load parameter into AX
+  PUSH BX     // Push the return address back onto stack
+  ADD AX,0x30 // Convert to ascii character
+  RET
+// |----------------- End of numToAscii subroutine -------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: asciiToNum                                           |
+// |-----------------------------------------------------------------|
+// |Parameters: Character to convert                                 |
+// |-----------------------------------------------------------------|
+// |Description: Converts an ascii character to a number             |
+// |-----------------------------------------------------------------|
+// |Return value: Converted number returned in AX register           |
+// |-----------------------------------------------------------------|
+asciiToNum:
+  POP BX      // Temporarily keep the return address in BX
+  POP AX      // Load parameter into AX
+  PUSH BX     // Push the return address back onto stack
+  SUB AX,0x30 // Convert to ascii character
+  RET
+// |----------------- End of asciiToNum subroutine -------------------|
+
+
+// |-----------------------------------------------------------------|
+// |Subroutine: error                                                |
+// |-----------------------------------------------------------------|
+// |Parameters: N/A                                                  |
+// |-----------------------------------------------------------------|
+// |Description: Outputs error to the screen and ends program        |
+// |-----------------------------------------------------------------|
+// |Return value: N/A                                                |
+// |-----------------------------------------------------------------|
+error:
+  MOV AX,errorText // Load error message
+  PUSH AX          // Push pointer to string as parameter
+  CALL printString
+  JMP exitProgram
+// |------------------- End of error subroutine ----------------------|
+
+
+// ------ Static declarations -------
+num1: DC.W 0x00
+num2: DC.W 0x00
+operator: DC.W 0x00
+result: DC.W 0x00
+outString: DC.W 0x00 // Pointer to the result as a string
+negativeFlags: DC.W 0x00
+// --- End of static declarations ---
+
+// ------ Constant Strings -------
+enterText:
+  // "Enter "
+  DC.W 'E'
+  DC.W 'n'
+  DC.W 't'
+  DC.W 'e'
+  DC.W 'r'
+  DC.W ' '
+  DC.W 0x0
+
+number1Text:
+  // "Number 1: "
+  DC.W 'N'
+  DC.W 'u'
+  DC.W 'm'
+  DC.W 'b'
+  DC.W 'e'
+  DC.W 'r'
+  DC.W ' '
+  DC.W '1'
+  DC.W ':'
+  DC.W ' '
+  DC.W 0x0
+
+number2Text:
+  // "Number 2: "
+  DC.W 'N'
+  DC.W 'u'
+  DC.W 'm'
+  DC.W 'b'
+  DC.W 'e'
+  DC.W 'r'
+  DC.W ' '
+  DC.W '2'
+  DC.W ':'
+  DC.W ' '
+  DC.W 0x0
+
+operationText:
+  // "Operation: "
+  DC.W 'O'
+  DC.W 'p'
+  DC.W 'e'
+  DC.W 'r'
+  DC.W 'a'
+  DC.W 't'
+  DC.W 'i'
+  DC.W 'o'
+  DC.W 'n'
+  DC.W ':'
+  DC.W ' '
+  DC.W 0x0
+
+resultText:
+  // "Result: "
+  DC.W 'R'
+  DC.W 'e'
+  DC.W 's'
+  DC.W 'u'
+  DC.W 'l'
+  DC.W 't'
+  DC.W ':'
+  DC.W ' '
+  DC.W 0x0
+
+exitText:
+  // "Enter X to exit"
+  DC.W 'E'
+  DC.W 'n'
+  DC.W 't'
+  DC.W 'e'
+  DC.W 'r'
+  DC.W ' '
+  DC.W '''
+  DC.W 'X'
+  DC.W '''
+  DC.W ' '
+  DC.W 't'
+  DC.W 'o'
+  DC.W ' '
+  DC.W 'e'
+  DC.W 'x'
+  DC.W 'i'
+  DC.W 't'
+  DC.W 0x0A
+  DC.W 0x00
+
+continueText:
+  // "Or 'Enter' to continue"
+  DC.W 'O'
+  DC.W 'r'
+  DC.W ' '
+  DC.W '''
+  DC.W 'E'
+  DC.W 'n'
+  DC.W 't'
+  DC.W 'e'
+  DC.W 'r'
+  DC.W '''
+  DC.W ' '
+  DC.W 't'
+  DC.W 'o'
+  DC.W ' '
+  DC.W 'c'
+  DC.W 'o'
+  DC.W 'n'
+  DC.W 't'
+  DC.W 'i'
+  DC.W 'n'
+  DC.W 'u'
+  DC.W 'e'
+  DC.W 0x00
+
+errorText:
+  // "Error"
+  DC.W 0x0C
+  DC.W 'E'
+  DC.W 'r'
+  DC.W 'r'
+  DC.W 'o'
+  DC.W 'r'
+  DC.W 0x00
+// --- End of String Constants ---
+
+// ------ Constants -------
+OUTDATA: EQU 0xF0
+OUTSTATUS: EQU 0xF2
+INDATA: EQU 0xF3
+INSTATUS: EQU 0xF5
+// --- End of Constants ---
